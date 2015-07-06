@@ -28,8 +28,9 @@ sotu <- rbind_all(alply(.data = files,
 
 
 
-# TODO: Extract year from header1
-
+# Feature Engineer
+sotu <- sotu %>%
+    mutate(year = as.integer(str_extract(string = file_name, pattern = '[0-9]{4}')))
 
 
 
