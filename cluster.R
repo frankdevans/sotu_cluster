@@ -4,11 +4,14 @@ library(tm)
 library(proxy)
 library(ggplot2)
 library(RColorBrewer)
+library(wordcloud)
+
+set.seed(1300)
 
 
 load(file = './data/sotu_df.RData')
 
-# TM EDA
+# TM Pipeline
 sotu_corpus <- Corpus(VectorSource(sotu$content)) %>%
     tm_map(x = ., FUN = PlainTextDocument) %>%
     tm_map(x = ., FUN = removePunctuation) %>%
@@ -21,11 +24,11 @@ doc_term <- DocumentTermMatrix(sotu_corpus)
 doc_term$dimnames$Docs <- sotu$file_name
 findFreqTerms(x = doc_term, lowfreq = 500)
 
-# Cluster: Hierarchical
 tf_idf <- weightTfIdf(m = doc_term, normalize = TRUE)
 tf_idf_mat <- as.matrix(tf_idf)
 tf_idf_dist <- dist(tf_idf_mat, method = 'cosine')
 
+# Cluster: Hierarchical
 clust_h <- hclust(d = tf_idf_dist, method = 'average')
 plot(clust_h)
 
@@ -85,17 +88,22 @@ pca_rep <- data_frame(sotu_name = sotu$file_name,
                       pc2 = pca_comp$x[,2],
                       clust_id = as.factor(km_clust$cluster))
 ggplot(data = pca_rep, mapping = aes(x = pc1, y = pc2, color = clust_id)) +
-    #geom_point(size = 4, shape = 16) +
     scale_color_brewer(palette = 'Set1') +
     geom_text(mapping = aes(label = sotu_name), size = 3, fontface = 'bold')
 
 
 
+# Examine Wordcloud
+term_doc <- TermDocumentMatrix(sotu_corpus)
+term_doc$dimnames$Docs <- sotu$file_name
+td_mat <- as.matrix(term_doc)
 
-
-
-
-
+commonality.cloud(term.matrix = td_mat)
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 1], max.words = 50)
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 2], max.words = 50)
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 3], max.words = 50)
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 4], max.words = 50)
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 5], max.words = 50)
 
 
 
