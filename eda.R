@@ -1,6 +1,9 @@
 library(dplyr)
+library(magrittr)
 library(tm)
+library(proxy)
 library(ggplot2)
+library(RColorBrewer)
 
 
 
@@ -14,6 +17,13 @@ ggplot(data = sotu, aes(x = year, y = char_content)) +
 sotu %>%
     arrange(desc(char_content)) %>%
     select(file_name, char_content)
+
+
+
+
+
+
+
 
 
 
