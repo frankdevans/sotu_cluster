@@ -33,10 +33,12 @@ clust_h <- hclust(d = tf_idf_dist, method = 'average')
 plot(clust_h)
 
 clust_h <- hclust(d = tf_idf_dist, method = 'ward.D2')
-plot(clust_h)
+plot(clust_h,
+    main = 'Cluster Dendrogram: Ward Cosine Distance',
+    xlab = '', ylab = '', sub = '')
 
 clust_h <- hclust(d = tf_idf_dist, method = 'mcquitty')
-plot(clust_h, 
+plot(clust_h,
      main = 'Cluster Dendrogram: McQuitty Cosine Distance',
      xlab = '', ylab = '', sub = '')
 
@@ -50,7 +52,7 @@ df_clust_cuts <- data_frame(cut_level = 1:length(sotu$file_name),
 
 for (i in 1:(nrow(df_clust_cuts) - 1)) {
     df_clust_cuts[df_clust_cuts$cut_level == i, 'avg_size'] <- mean(table(cutree(tree = clust_h, k = i)))
-    
+
     df_dist <- data_frame(doc_name = doc_term$dimnames$Docs,
                           clust_cut = cutree(tree = clust_h, k = i)) %>%
         inner_join(x = ., y = ., by = 'clust_cut') %>%
@@ -62,7 +64,7 @@ for (i in 1:(nrow(df_clust_cuts) - 1)) {
     df_dist <- df_dist %>%
         group_by(clust_cut) %>%
         summarise(cos_dist = mean(cos_dist))
-    
+
     df_clust_cuts[df_clust_cuts$cut_level == i, 'avg_dist'] <- mean(df_dist$cos_dist)
 }
 

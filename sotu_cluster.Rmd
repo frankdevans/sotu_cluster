@@ -5,9 +5,9 @@ output: html_document
 ---
 
 **Overview**  
-The President's State of the Union address has changed considerably over time, primarily reflecting 
-the era in which it is delivered moreso than the individual president or the political affiliation 
-of the President delivering the speech. However, there is one major exception in President George 
+The President's State of the Union address has changed considerably over time, more reflecting 
+the era in which it is delivered than the individual president or the political affiliation 
+of the president delivering the speech. However, there is one major exception in President George 
 W. Bush, whose style and content marks a sharp departure from both his predecessors and contemporaries.
   
 This analysis takes all Presidential State of the Union addresses from Harry S Truman to Barack 
@@ -81,8 +81,8 @@ sotu_corpus <- Corpus(VectorSource(sotu$content)) %>%
 
 
 **Model: TF-IDF**  
-The first step in modeling is to create a Document Term Matrix, with the documents as the rows and 
-the individual words along the columns, with a frequency count as the content. The Corpus object 
+The first step in modeling is to create a Document Term Matrix, with the documents as the rows, 
+the individual words along the columns, and a frequency count as the content. The Corpus object 
 populates the term meta-data automatically during the tokenization process. However, it will be 
 necessary to manually import the document names into the meta-data of the matrix.
 ```{r}
@@ -107,7 +107,7 @@ tf_idf_mat <- as.matrix(tf_idf)
 
 Once the frequencies are calculated, a square matrix of all documents is processed as a distance 
 lookup for clustering. The documents have a large number of terms, which means that the distance 
-exists in a very high dimensional space. It is for this reason that distance is computed as cosine 
+exists in very high dimensional space. It is for this reason that distance is computed as cosine 
 similarity rather than normal euclidean distance.
 ```{r}
 tf_idf_dist <- dist(tf_idf_mat, method = 'cosine')
@@ -132,7 +132,7 @@ From this cluster dendrogram the first patterns are apparent:
 2. Speeches from the same Political Party and Era are commonly next to cluster (Obama & Clinton, 
 Reagan & Bush Sr., Eisenhower & Truman)  
 3. There is a set of potential outliers in 6 of George W. Bush's speeches that are the last to merge 
-with any others, whereas the balance of his speeches cluster as would be expected with Bush Sr. and 
+with any others, though the balance of his speeches cluster as would be expected with Bush Sr. and 
 Reagan.  
   
   
@@ -176,7 +176,7 @@ ggplot(data = df_clust_cuts, aes(x = cut_level, y = avg_dist)) +
          x = 'Tree Cut Level / Number of Final Clusters',
          y = 'Intra-Cluster Mean Cosine Distance')
 ```
-The above graph shows the expected gradual decline as the tree is cut from 20 clusters up to 
+The above graph shows an expected gradual decline as the tree is cut from 20 clusters up to 
 approaching the number of clusters as there are documents (i.e. each document in its own cluster). 
 Optimally, it is preferable to have as few clusters as necessary such that the Mean Cosine Distance 
 within each cluster is minimized (indicating maximum cluster cohesiveness). There is a local minimum 
@@ -231,7 +231,7 @@ ggplot(data = pca_rep, mapping = aes(x = pc1, y = pc2, color = clust_id)) +
 ```
 Many of the same patterns are apparent. The amount of distance among the same 6 George W. Bush speeches 
 is stark from both the rest of the same era and party. It is additionally easy to see the same early 
-level clusters among party and era combined. However, this visualization takes that context 1 step 
+level clusters among party and era combined. However, this visualization takes that context a step 
 further. With the exception of George W. Bush's speeches, the balance of speeches largely exist 
 along a kind of spectrum that has roughly ordered the speeches across time, despite the fact that no 
 date data is present in the model (it was stripped out in the loading step). Thus, it appears that 
