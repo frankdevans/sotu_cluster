@@ -16,14 +16,13 @@ sotu_corpus <- Corpus(VectorSource(sotu$content)) %>%
     tm_map(x = ., FUN = PlainTextDocument) %>%
     tm_map(x = ., FUN = removePunctuation) %>%
     tm_map(x = ., FUN = removeNumbers) %>%
-    tm_map(x = ., FUN = removeWords, stopwords(kind = 'SMART')) %>%
     tm_map(x = ., FUN = removeWords, stopwords(kind = 'en')) %>%
     tm_map(x = ., FUN = stripWhitespace)
 
 
 doc_term <- DocumentTermMatrix(sotu_corpus)
 doc_term$dimnames$Docs <- sotu$file_name
-findFreqTerms(x = doc_term, lowfreq = 500)
+#findFreqTerms(x = doc_term, lowfreq = 500)
 
 tf_idf <- weightTfIdf(m = doc_term, normalize = TRUE)
 tf_idf_mat <- as.matrix(tf_idf)
@@ -37,7 +36,9 @@ clust_h <- hclust(d = tf_idf_dist, method = 'ward.D2')
 plot(clust_h)
 
 clust_h <- hclust(d = tf_idf_dist, method = 'mcquitty')
-plot(clust_h)
+plot(clust_h, 
+     main = 'Cluster Dendrogram: McQuitty Cosine Distance',
+     xlab = '', ylab = '', sub = '')
 
 
 # Compute Cohesiveness
@@ -108,8 +109,14 @@ ggplot(data = pca_rep, mapping = aes(x = pc1, y = pc2, color = clust_id)) +
 term_doc <- TermDocumentMatrix(sotu_corpus)
 term_doc$dimnames$Docs <- sotu$file_name
 td_mat <- as.matrix(term_doc)
+td_mat <- td_mat[!row.names(td_mat) %in% stopwords(kind = 'SMART'),]
 
 commonality.cloud(term.matrix = td_mat)
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 3], max.words = 50)
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster != 3], max.words = 50)
+
+
+
 commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 1], max.words = 50)
 commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 2], max.words = 50)
 commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 3], max.words = 50)
@@ -117,14 +124,8 @@ commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 4], max.words = 50)
 commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 5], max.words = 50)
 
 
-
-
-
-
-
-
-
-
+td_mat <- td_mat[!row.names(td_mat) %in% c('applause'),]
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 3], max.words = 50)
 
 
 
