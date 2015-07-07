@@ -16,6 +16,7 @@ sotu_corpus <- Corpus(VectorSource(sotu$content)) %>%
     tm_map(x = ., FUN = PlainTextDocument) %>%
     tm_map(x = ., FUN = removePunctuation) %>%
     tm_map(x = ., FUN = removeNumbers) %>%
+    tm_map(x = ., FUN = removeWords, stopwords(kind = 'SMART')) %>%
     tm_map(x = ., FUN = removeWords, stopwords(kind = 'en')) %>%
     tm_map(x = ., FUN = stripWhitespace)
 
@@ -67,29 +68,39 @@ for (i in 1:(nrow(df_clust_cuts) - 1)) {
 
 # Graph Cohesiveness
 ggplot(data = df_clust_cuts, aes(x = cut_level, y = avg_dist)) +
-    geom_line()
+    geom_line(color = 'steelblue', size = 2) +
+    labs(title = 'Cosine Distance of Hierarchical Clusters by Tree Cut',
+         x = 'Tree Cut Level / Number of Final Clusters',
+         y = 'Intra-Cluster Mean Cosine Distance')
 
-ggplot(data = df_clust_cuts, aes(x = cut_level, y = avg_size)) +
-    geom_line()
 
-
-ggplot(data = df_clust_cuts, aes(x = avg_size, y = avg_dist)) +
-    geom_point()
+ggplot(data = df_clust_cuts, aes(x = avg_size, y = avg_dist, color = cut_level)) +
+    geom_point(size = 4) +
+    labs(title = 'Mean Cluster Size & Cosine Distance by Tree Cut',
+         x = 'Mean Number of Documents per Cluster',
+         y = 'Intra-Cluster Mean Cosine Distance')
 
 
 
 
 # Cluster: KMeans
 tf_idf_norm <- tf_idf_mat / apply(tf_idf_mat, MARGIN = 1, FUN = function(x) sum(x^2)^0.5)
-km_clust <- kmeans(tf_idf_norm, 5)
+km_clust <- kmeans(x = tf_idf_norm, centers = 5, iter.max = 25)
 pca_comp <- prcomp(tf_idf_norm)
 pca_rep <- data_frame(sotu_name = sotu$file_name,
                       pc1 = pca_comp$x[,1],
                       pc2 = pca_comp$x[,2],
                       clust_id = as.factor(km_clust$cluster))
+
 ggplot(data = pca_rep, mapping = aes(x = pc1, y = pc2, color = clust_id)) +
     scale_color_brewer(palette = 'Set1') +
-    geom_text(mapping = aes(label = sotu_name), size = 3, fontface = 'bold')
+    geom_text(mapping = aes(label = sotu_name), size = 3, fontface = 'bold') +
+    labs(title = 'K-Means Cluster: 5 clusters on PCA Features',
+         x = 'Principal Component Analysis: Factor 1',
+         y = 'Principal Component Analysis: Factor 2') +
+    theme_grey() +
+    theme(legend.position = 'right',
+          legend.title = element_blank())
 
 
 
