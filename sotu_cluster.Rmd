@@ -1,0 +1,319 @@
+---
+title: "State of the Union Text Clustering"
+author: "Frank D. Evans"
+output: html_document
+---
+
+**Overview**  
+The President's State of the Union address has changed considerably over time, primarily reflecting 
+the era in which it is delivered moreso than the individual president or the political affiliation 
+of the President delivering the speech. However, there is one major exception in President George 
+W. Bush, whose style and content marks a sharp departure from both his predecessors and contemporaries.
+  
+This analysis takes all Presidential State of the Union addresses from Harry S Truman to Barack 
+Obama and clusters them by the content of the text in order to better understand how they have 
+changed over the course of history.
+  
+**Environment Setup & Pre-processing**  
+Load necessary libraries and set random seed (necessary to make K-Means deterministic & replicable).
+```{r echo = TRUE, warning = FALSE, message = FALSE}
+library(stringr)
+library(plyr)
+library(dplyr)
+library(magrittr)
+library(tm)
+library(proxy)
+library(ggplot2)
+library(RColorBrewer)
+library(wordcloud)
+
+set.seed(1300)
+```
+
+
+Gather list of all document files to be processed.
+```{r}
+files <- list.files(path = './data/sotu/')
+```
+
+
+Register parse function closure for vectorization. Each instance of the parse function will open 
+a given file, parse its contents, and output the results as a single entry DataFrame. The DataFrames 
+are then bound into a single object. The output object is mutated to extract the 4 digit year from 
+the file name, which may be useful for modeling the time dimension in Exploratory Analysis.
+```{r}
+parse_sotu_text <- function(file_name) {
+    full_path <- paste('./data/sotu/', file_name, sep = '')
+    raw <- scan(file = full_path, what = character(), sep = '\n')
+    raw <- raw[nchar(raw) > 1]  # delete empty lines, single whitespace char
+    sotu_content <- raw[3:length(raw)]  # first 2 lines are headers
+    
+    output <- data_frame(file_name = file_name,
+                         head1 = raw[1],
+                         head2 = raw[2],
+                         char_content = sum(nchar(sotu_content)),
+                         content = paste0(sotu_content, sep = ' ', collapse = ' '))
+    return(output)
+}
+
+sotu <- rbind_all(alply(.data = files, 
+                        .margins = 1, 
+                        .fun = parse_sotu_text))
+
+sotu <- sotu %>%
+    mutate(year = as.integer(str_extract(string = file_name, pattern = '[0-9]{4}')))
+```
+
+
+**Data Cleaning**  
+To clean the data, the Text Mining `tm` library is leveraged. This library includes multiple function 
+closures to do the main text pre-processing steps. Using the `magrittr` library pipeline operator 
+`%>%` allows this pre-processing series of function maps to bind to a single variable. The result is 
+a Corpus object with each document an element of the corpus.
+```{r}
+sotu_corpus <- Corpus(VectorSource(sotu$content)) %>%
+    tm_map(x = ., FUN = PlainTextDocument) %>%
+    tm_map(x = ., FUN = removePunctuation) %>%
+    tm_map(x = ., FUN = removeNumbers) %>%
+    tm_map(x = ., FUN = removeWords, stopwords(kind = 'en')) %>%
+    tm_map(x = ., FUN = stripWhitespace)
+```
+
+
+**Model: TF-IDF**  
+The first step in modeling is to create a Document Term Matrix, with the documents as the rows and 
+the individual words along the columns, with a frequency count as the content. The Corpus object 
+populates the term meta-data automatically during the tokenization process. However, it will be 
+necessary to manually import the document names into the meta-data of the matrix.
+```{r}
+doc_term <- DocumentTermMatrix(sotu_corpus)
+doc_term$dimnames$Docs <- sotu$file_name
+```
+
+
+From the Document Term Matrix, it is possible to create a Term Frequency - Inverse Document Frequency 
+matrix. This object is a matrix of the same dimentions as the Document Term Frequency matrix above, 
+except each frequency has been normalized to the frequency of the term in the entire document. This 
+gives additional weight to a term that is common in a given document, but comparably rare in the 
+entire corpus. At the same time, terms that are common across many or all documents are penalized in 
+frequency for any single document as they provide a smaller amount of unique information about a 
+given document. At the same time, a native matrix object version is created and stored to be more 
+compatable with further processing needs.
+```{r}
+tf_idf <- weightTfIdf(m = doc_term, normalize = TRUE)
+tf_idf_mat <- as.matrix(tf_idf)
+```
+
+
+Once the frequencies are calculated, a square matrix of all documents is processed as a distance 
+lookup for clustering. The documents have a large number of terms, which means that the distance 
+exists in a very high dimensional space. It is for this reason that distance is computed as cosine 
+similarity rather than normal euclidean distance.
+```{r}
+tf_idf_dist <- dist(tf_idf_mat, method = 'cosine')
+```
+
+
+**Model: Hierarchical Clustering**  
+The first model is to create a hierarchical cluster, which will show the cohesion among clusters at 
+all levels since the hierarchical method preserves all intermediate clusters. The Ward Method of 
+clustering is used to place a heavy weight on the cohesiveness of a formed cluster at each step of 
+the process. The goal of clustering is to learn implicit features about groups of documents, and thus 
+the most interpretable clustering should weight its decisions on those documents that could be merged 
+and would create the least mutated new document.
+```{r fig.align='center', fig.height=8, fig.width=10}
+clust_h <- hclust(d = tf_idf_dist, method = 'ward.D2')
+plot(clust_h,
+    main = 'Cluster Dendrogram: Ward Cosine Distance',
+    xlab = '', ylab = '', sub = '')
+```
+From this cluster dendrogram the first patterns are apparent:  
+1. Speeches made by the same president are almost always the first to cluster.  
+2. Speeches from the same Political Party and Era are commonly next to cluster (Obama & Clinton, 
+Reagan & Bush Sr., Eisenhower & Truman)  
+3. There is a set of potential outliers in 6 of George W. Bush's speeches that are the last to merge 
+with any others, whereas the balance of his speeches cluster as would be expected with Bush Sr. and 
+Reagan.  
+  
+  
+_Cutting the Tree_: to find an optimal number of clusters, it is useful to investigate the curve of 
+cluster cohesiveness that exists within the space of where the tree can be cut and separate clusters 
+are defined. To produce this curve, a loop will cycle through all possible levels the hierarchical 
+tree can be cut (from 1 to number-of-documents minus 1). For each cut level, the mean number of 
+documents in each cluster and the mean distance between sets of points in each cluster is stored.
+```{r}
+dist_mat <- as.matrix(tf_idf_dist)
+
+df_clust_cuts <- data_frame(cut_level = 1:length(sotu$file_name),
+                            avg_size = 0,
+                            avg_dist = 0)
+
+for (i in 1:(nrow(df_clust_cuts) - 1)) {
+    df_clust_cuts[df_clust_cuts$cut_level == i, 'avg_size'] <- mean(table(cutree(tree = clust_h, k = i)))
+
+    df_dist <- data_frame(doc_name = doc_term$dimnames$Docs,
+                          clust_cut = cutree(tree = clust_h, k = i)) %>%
+        inner_join(x = ., y = ., by = 'clust_cut') %>%
+        filter(doc_name.x != doc_name.y)
+    df_dist$cos_dist <- NA
+    for (t in 1:nrow(df_dist)) {
+        df_dist$cos_dist[t] <- dist_mat[df_dist$doc_name.x[t], df_dist$doc_name.y[t]]
+    }
+    df_dist <- df_dist %>%
+        group_by(clust_cut) %>%
+        summarise(cos_dist = mean(cos_dist))
+
+    df_clust_cuts[df_clust_cuts$cut_level == i, 'avg_dist'] <- mean(df_dist$cos_dist)
+}
+```
+
+
+With this data frame of outcomes, it is straightforward to graph the space of possibilities.
+```{r fig.align='center', fig.height=5, fig.width=8}
+ggplot(data = df_clust_cuts, aes(x = cut_level, y = avg_dist)) +
+    geom_line(color = 'steelblue', size = 2) +
+    labs(title = 'Cosine Distance of Hierarchical Clusters by Tree Cut',
+         x = 'Tree Cut Level / Number of Final Clusters',
+         y = 'Intra-Cluster Mean Cosine Distance')
+```
+The above graph shows the expected gradual decline as the tree is cut from 20 clusters up to 
+approaching the number of clusters as there are documents (i.e. each document in its own cluster). 
+Optimally, it is preferable to have as few clusters as necessary such that the Mean Cosine Distance 
+within each cluster is minimized (indicating maximum cluster cohesiveness). There is a local minimum 
+at about 5 clusters that is not surpassed in cohesiveness until closer to 40 clusters are computed. 
+Having the smaller number of clusters is far more preferable.
+
+
+```{r fig.align='center', fig.height=5, fig.width=8}
+ggplot(data = df_clust_cuts, aes(x = avg_size, y = avg_dist, color = cut_level)) +
+    geom_point(size = 4) +
+    labs(title = 'Mean Cluster Size & Cosine Distance by Tree Cut',
+         x = 'Mean Number of Documents per Cluster',
+         y = 'Intra-Cluster Mean Cosine Distance')
+```
+This is confirmed when looking at the balance of cluster size for the chosen cut level. A cut that 
+yields about 5 clusters results in about 15-18 documents per cluster, which appears to be a solid 
+balance agaist higher cut levels.
+  
+  
+**Model: K-Means Cluster**  
+To confirm the hierarchical cluster analysis, a K-Means cluster analysis is computed which will 
+provide a more visual representation of the cluster space. Since K-Means relies on Euclidean Distance 
+rather than Cosine Dissimilarity, it is first necesary to normalize the TF-IDF matrix. The K-Means 
+process itself will cluster for 5 centroids, and increase the maximum iterations from the default 
+of 10 to 25.
+```{r}
+tf_idf_norm <- tf_idf_mat / apply(tf_idf_mat, MARGIN = 1, FUN = function(x) sum(x^2)^0.5)
+km_clust <- kmeans(x = tf_idf_norm, centers = 5, iter.max = 25)
+```
+  
+  
+The data contains thousands of dimensions, a dimension for each term. Although the clusters are 
+built using the full dimensional feature space, it will not be practical to visualize this many 
+dimensions. To make visualization more palatable, Principal Components Analysis is performed and the 
+2 most important components are mapped to a plot along with meta-data for markup purposes.
+```{r fig.align='center', fig.height=8, fig.width=8}
+pca_comp <- prcomp(tf_idf_norm)
+pca_rep <- data_frame(sotu_name = sotu$file_name,
+                      pc1 = pca_comp$x[,1],
+                      pc2 = pca_comp$x[,2],
+                      clust_id = as.factor(km_clust$cluster))
+
+ggplot(data = pca_rep, mapping = aes(x = pc1, y = pc2, color = clust_id)) +
+    scale_color_brewer(palette = 'Set1') +
+    geom_text(mapping = aes(label = sotu_name), size = 2.5, fontface = 'bold') +
+    labs(title = 'K-Means Cluster: 5 clusters on PCA Features',
+         x = 'Principal Component Analysis: Factor 1',
+         y = 'Principal Component Analysis: Factor 2') +
+    theme_grey() +
+    theme(legend.position = 'right',
+          legend.title = element_blank())
+```
+Many of the same patterns are apparent. The amount of distance among the same 6 George W. Bush speeches 
+is stark from both the rest of the same era and party. It is additionally easy to see the same early 
+level clusters among party and era combined. However, this visualization takes that context 1 step 
+further. With the exception of George W. Bush's speeches, the balance of speeches largely exist 
+along a kind of spectrum that has roughly ordered the speeches across time, despite the fact that no 
+date data is present in the model (it was stripped out in the loading step). Thus, it appears that 
+the content of the State of the Union addresses is largely driven by the era it is reflecting more 
+that the political association of the president giving it.
+
+
+**Analysis**  
+In order to dig deeper into underlying drivers, examining the most common terms may help shed light 
+on those factors that mean the most to each cluster. To produce a word cloud specifically for this 
+purpose, it is necessary to produce a Term Document Matrix. This matrix is largely similar to the 
+Document Term matrix created earlier, but due to the needs of the library, will have its rows and 
+columns switched. At the same time, a larger set of common stop words will be scrubbed using the 
+Cornell SMART list.
+```{r warning=FALSE}
+term_doc <- TermDocumentMatrix(sotu_corpus)
+term_doc$dimnames$Docs <- sotu$file_name
+td_mat <- as.matrix(term_doc)
+td_mat <- td_mat[!row.names(td_mat) %in% stopwords(kind = 'SMART'),]
+commonality.cloud(term.matrix = td_mat)
+```
+  
+The terms common across all speeches are no surprise. They are the staple terms of presidential 
+patriotism and political populism.
+
+
+```{r warning=FALSE}
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster != 3], max.words = 50)
+```
+  
+_Spectrum vs. Outliers_: Inspecting the words most common across the large spectrum shows a much 
+larger emphasis on use of the word "world", with many of the other terms occuring in s similar capacity.
+
+
+```{r warning=FALSE}
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 3], max.words = 50)
+```
+  
+The potential outlier cluster housing 6 of George W. Bush's speeches is heavily influenced by the 
+frequent use of the word "applause". If this term is temporarily removed from the set, it may provide 
+more information as to secondary drivers.
+
+```{r warning=FALSE}
+td_mat <- td_mat[!row.names(td_mat) %in% c('applause'),]
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 3], max.words = 50)
+```
+  
+With "applause" gone, other differences immediately crop up. Where the large spectrum commonly used 
+the term "nation", these 6 speeches use other terms far more often like "america" and "country". 
+Additionally, other terms show up in higher frequency like "freedom" and "security" .
+  
+_Within the Spectrum_: In order to understand the differences within the spectrum, the post-WWII set 
+(cluster 4) is compared to the most modern set (cluster 2).
+```{r warning=FALSE}
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 4], max.words = 50)
+```
+  
+The post-WWII/Korean War era speeches largely emphasize the "nation" and related terms, and reflect 
+a concern for the recovering economy fresh from the scars of the Great Depression.
+
+
+
+```{r warning=FALSE}
+commonality.cloud(term.matrix = td_mat[,km_clust$cluster == 2], max.words = 50)
+```
+  
+The tone is markedly different at the other end of the spectrum in the modern era. Multiple terms 
+related to time are apparent, like "year/years" and "time". There is additional a stark contrast in 
+the use of "nation" in the earler era to the explicit "america" in multiple forms.
+
+
+**Conclusion**  
+The presidential State of the Union speech largely reflects the time in which it is delivered. Though 
+stylistic differences are commonly notable and detectable across a single president as well as a 
+combination of the political party and era--its magnitude is secondary. On its own, political affiliation 
+is not a characteristic driver compared to the position in time. Democrat Jimmy Carter's 1978 State of 
+the Union has more in common with Republican Ronald Reagan's 1981 speech than it does with fellow 
+Democrat Bill Clinton's 1993 speech. This pattern is pervasive and leads to the conclusion that with 
+the exception of George W. Bush, the content of the State of the Union is most largely driven by the 
+evolution of time.
+  
+  
+  
+  
+  
